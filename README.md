@@ -36,13 +36,14 @@
   - 목표 
     - 1) 라이다를 통해 주변을 인식하여 자율주행 가능한 로봇을 구현
     - 2) 로봇이 주행중 영상을 획득하고, 무기를 소지한 사람을 인식하여 사용자에게 알림을 보낸다.
-  - 방법: Lidar Sensor 활용, RC 로봇 자율주행, 딥러닝 & 머신러닝 모델 활용
+  - 방법: Lidar Sensor 활용, RC 로봇 자율주행, 딥러닝 모델 활용
+  - HW: 라즈베리파이4 * 2대, 2D Lidar 센서, 초음파 센서, 파이카메라3
 * Members
   | Name | Role |
   |----|----|
-  | 박인혁 | Project leading(선장), 프로젝트 총괄, Lidar Sensor & 자율주행 담당 |
-  | 권시우 | Project manager(엔지니어), 흉기인식 머신러닝 모델 구현, RC 차량파트 |
-  | 박정우 | UI design(갑판장), 흉기인식 머신러닝 모델 구현, RC 차량파트 |
-  | 조명근 | AI modeling(항해사), 영상처리 파트, RC 차량파트 |
+  | 박인혁 | ROS2 베이스의 Lidar Sensor & 자율주행 담당 / (조장) |
+  | 권시우 | RC 차량파트, 흉기 및 사람인식 딥러닝 모델 구현 |
+  | 박정우 | RC 차량파트, 흉기 및 사람인식 딥러닝 모델 구현 |
+  | 조명근 | 영상처리 모델 라즈베리파이 적용 및 최적화, RC 차량파트 |
 * Project Github : https://github.com/FaceDown77/intel-class-PJT03.git
 * 발표자료 : https://github.com/FaceDown77/intel-class-PJT03.git/doc/presentation.pptx
