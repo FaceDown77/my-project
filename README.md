@@ -64,7 +64,7 @@ gantt
 ### ⚙️ 하드웨어 및 시스템 (작성중, 이미지파일 적용예정)
 - 입출력 구성
 
-![입출력 구성도](./doc/images/inout_diagram.jpg)
+![입출력 구성도](./doc/images/inout_diagram_v2.jpg)
 
 - 동작 플로우
 
