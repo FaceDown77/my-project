@@ -66,10 +66,6 @@ gantt
 
 ![입출력 구성도](./doc/images/inout_diagram.jpg)
 
-- 하드웨어 연결
-
-![하드웨어 구성도](./doc/images/hardware_diagram.jpg)
-
 - 동작 플로우
 
 ![동작 플로우차트](./doc/images/flowchart_diagram.jpg)
