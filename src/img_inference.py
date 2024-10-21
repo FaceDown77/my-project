@@ -1,21 +1,34 @@
 import torch
 import cv2
+import RPi.GPIO as GPIO
 from time import sleep, strftime, time
 from threading import Thread, Timer
 import threading
 import os
 import serial
 
+# 시리얼 통신 설정
 ser = serial.Serial('/dev/serial0', 9600, timeout=1)
 
 def send_manual_mode_signal():
     try:
-        # 칼이 탐지되면 'manual' 신호 전송
         ser.write(b'manual\n')
         print("Manual mode signal sent via serial")
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
 
+# GPIO 설정
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
+green_led_pin = 17  # 초록색 LED 핀
+red_led_pin = 18    # 빨간색 LED 핀
+buzzer_pin = 19     # 부저 핀
+
+# GPIO 핀 설정
+GPIO.setup(green_led_pin, GPIO.OUT)
+GPIO.setup(red_led_pin, GPIO.OUT)
+GPIO.setup(buzzer_pin, GPIO.OUT)
 
 # YOLOv5 모델 불러오기 (CPU 사용)
 model1 = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/ele95/yolov5/best.pt', _verbose=False)
@@ -32,12 +45,12 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
 # 프레임 스킵 변수
-frame_skip = 5  # 5 프레임마다 한 번씩 처리
+frame_skip = 5
 frame_count = 0
 
 # 빠른 움직임 감지에 필요한 변수들
-prev_person_box = None  # 이전에 감지된 사람의 바운딩 박스 좌표
-prev_time = time()      # 이전에 감지된 시간
+prev_person_box = None
+prev_time = time()
 movement_threshold = 100  # 초당 100픽셀 이상 이동 시 빠른 움직임으로 간주
 
 # 사진 저장 주기 타이머 상태
@@ -55,19 +68,17 @@ def save_image_continuously(frame, label):
     timestamp = strftime("%Y%m%d_%H%M%S")
     cv2.imwrite(f"{save_dir}/{label}_{timestamp}.jpg", frame)
     print(f"Captured {label}_{timestamp}.jpg")
-
-    # 일정 시간이 지나면 사진 촬영을 종료
-    capturing = False  # 다시 사진 촬영이 가능하게 함
+    capturing = False
 
 # LED와 부저를 깜빡이기 위한 함수
-def blink_led_buzzer(led, buzzer=None, blink_time=1):
-    led.on()
-    if buzzer:
-        buzzer.on()
+def blink_led_buzzer(led_pin, buzzer_pin=None, blink_time=1):
+    GPIO.output(led_pin, GPIO.HIGH)
+    if buzzer_pin:
+        GPIO.output(buzzer_pin, GPIO.HIGH)
     sleep(blink_time)
-    led.off()
-    if buzzer:
-        buzzer.off()
+    GPIO.output(led_pin, GPIO.LOW)
+    if buzzer_pin:
+        GPIO.output(buzzer_pin, GPIO.LOW)
 
 # 실시간 웹캠 피드에서 객체 탐지
 while cap.isOpened():
@@ -79,7 +90,6 @@ while cap.isOpened():
 
     # 매 5 프레임마다 한 번씩 처리
     if frame_count % frame_skip == 0:
-        # YOLO 모델에 맞게 프레임 크기를 320x240으로 조정
         img = cv2.resize(frame, (320, 240))
 
         # 모델 1에서 탐지 수행 (Person)
@@ -104,29 +114,31 @@ while cap.isOpened():
                 cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
                 cv2.putText(frame, 'Person', (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
 
-                # 이전에 사람의 위치가 있었을 때, 현재 위치와 비교해 빠른 움직임 감지
+                # 빠른 움직임 감지
                 current_time = time()
                 if prev_person_box:
                     prev_xmin, prev_ymin, prev_xmax, prev_ymax = prev_person_box
-                    distance = ((xmin - prev_xmin) ** 2 + (ymin - prev_ymin) ** 2) ** 0.5  # 이동 거리 계산
-                    time_diff = current_time - prev_time  # 시간 차이 계산
-                    speed = distance / time_diff  # 초당 픽셀 이동 속도
+                    distance = ((xmin - prev_xmin) ** 2 + (ymin - prev_ymin) ** 2) ** 0.5
+                    time_diff = current_time - prev_time
+                    speed = distance / time_diff
 
                     if speed > movement_threshold:
                         print(f"Fast movement detected: {speed:.2f} pixels/second")
                         fast_movement_detected = True
-                        # 빠른 움직임 시 사진 촬영
+
+                        # 빠른 움직임 시 빨간색 LED와 부저 켜기
+                        GPIO.output(red_led_pin, GPIO.HIGH)
+                        GPIO.output(buzzer_pin, GPIO.HIGH)
+
                         if not capturing:
                             capturing = True
                             timestamp = strftime("%Y%m%d_%H%M%S")
                             cv2.imwrite(f"{save_dir}/fast_movement_{timestamp}.jpg", frame)
                             print(f"Captured fast_movement_{timestamp}.jpg")
 
-                            # 2초 후에 다시 사진 촬영
                             capture_timer = Timer(2, save_image_continuously, args=(frame, 'fast_movement'))
                             capture_timer.start()
 
-                # 현재 위치와 시간을 이전 값으로 저장
                 prev_person_box = (xmin, ymin, xmax, ymax)
                 prev_time = current_time
 
@@ -140,37 +152,38 @@ while cap.isOpened():
 
                 send_manual_mode_signal()
 
-                # 칼이 탐지되었을 때 사진 촬영
                 if not capturing:
                     capturing = True
                     timestamp = strftime("%Y%m%d_%H%M%S")
                     cv2.imwrite(f"{save_dir}/detected_knife_{timestamp}.jpg", frame)
                     print(f"Captured detected_knife_{timestamp}.jpg")
 
-                    # 2초 후에 다시 사진 촬영
                     capture_timer = Timer(2, save_image_continuously, args=(frame, 'detected_knife'))
                     capture_timer.start()
 
         # 사람 탐지 시 초록색 LED 깜빡임 (스레드에서 실행)
         if person_detected and not fast_movement_detected:
-            threading.Thread(target=blink_led_buzzer, args=(green_led,)).start()
+            threading.Thread(target=blink_led_buzzer, args=(green_led_pin,)).start()
 
         # 빠른 움직임 또는 무기 탐지 시 빨간색 LED와 부저 깜빡임 (스레드에서 실행)
         if fast_movement_detected or weapon_detected:
-            threading.Thread(target=blink_led_buzzer, args=(red_led, buzzer)).start()
+            threading.Thread(target=blink_led_buzzer, args=(red_led_pin, buzzer_pin)).start()
 
-    # 결과 프레임 출력
     cv2.imshow('YOLO Detection - Person and Weapon', frame)
 
-    # 'q' 키를 누르면 종료
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# 자원 해제
 cap.release()
 cv2.destroyAllWindows()
 
-# 프로그램 종료 시 LED 및 부저 끄기
+# 프로그램 종료 시 GPIO 핀 해제
+GPIO.output(green_led_pin, GPIO.LOW)
+GPIO.output(red_led_pin, GPIO.LOW)
+GPIO.output(buzzer_pin, GPIO.LOW)
+GPIO.cleanup()
+
+# 시리얼 포트 닫기
 ser.close()
 
 # 타이머 해제
