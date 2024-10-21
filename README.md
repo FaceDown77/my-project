@@ -21,7 +21,7 @@
 - b. 로봇이 카메라를 통해 주행 중 영상을 획득.
 - c. 획득한 영상에서 무기를 소지한 사람을 인식하고 사용자에게 알림을 보낸다.
 
-### 📅 일정 (작성중)
+### 📅 일정
 ```mermaid
 gantt
     title 작업 일정
@@ -63,12 +63,15 @@ gantt
 
 ### ⚙️ 하드웨어 및 시스템 (작성중, 이미지파일 적용예정)
 - 입출력 구성
+
 ![입출력 구성도](./doc/images/inout_diagram.jpg)
 
 - 하드웨어 연결
+
 ![하드웨어 구성도](./doc/images/hardware_diagram.jpg)
 
 - 동작 플로우
+
 ![동작 플로우차트](./doc/images/flowchart_diagram.jpg)
 
 ### 🚧 (작성중) 🚧
