@@ -1,3 +1,4 @@
+from flask import Flask, Response
 import torch
 import cv2
 import RPi.GPIO as GPIO
@@ -6,6 +7,9 @@ from threading import Thread, Timer
 import threading
 import os
 import serial
+import socket
+
+app = Flask(__name__)
 
 # 시리얼 통신 설정
 ser = serial.Serial('/dev/serial0', 9600, timeout=1)
@@ -62,12 +66,49 @@ save_dir = '/home/ele95/Pictures'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
-# 2초마다 사진을 저장하는 함수
-def save_image_continuously(frame, label):
-    global capturing, capture_timer
+# 서버 연결 설정 (프로그램 시작 시 한번만 수행)
+def setup_connection(server_ip, server_port=5001):
+    try:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((server_ip, server_port))  # 서버에 한번 연결
+        print(f"Connected to {server_ip} on port {server_port}")
+        return client_socket
+    except Exception as e:
+        print(f"Failed to connect to server: {e}")
+        return None
+
+# 파일 전송 (이미 연결된 소켓을 사용)
+def send_file(client_socket, file_path):
+    try:
+        file_name = file_path.split('/')[-1]  # 파일 이름 추출
+        client_socket.send((file_name+'\n').encode('UTF-8'))  # 파일 이름 전송
+        print(f"Sending file: {file_name}")
+
+        # 파일 내용 전송
+        with open(file_path, 'rb') as f:
+            while True:
+                file_data = f.read(1024)
+                if not file_data:
+                    break
+                client_socket.send(file_data)
+
+        print(f"{file_name} successfully sent.")
+    except Exception as e:
+        print(f"Error sending file: {e}")
+
+# 2초마다 사진을 저장하고 전송하는 함수
+def save_image_and_send(client_socket, frame, label):
     timestamp = strftime("%Y%m%d_%H%M%S")
-    cv2.imwrite(f"{save_dir}/{label}_{timestamp}.jpg", frame)
+    image_path = f"{save_dir}/{label}_{timestamp}.jpg"
+    cv2.imwrite(image_path, frame)
     print(f"Captured {label}_{timestamp}.jpg")
+
+    # 파일 전송
+    send_file(client_socket, image_path)
+
+# 빠른 움직임 감지 후 일정 시간이 지나면 다시 저장할 수 있도록 capturing 변수를 초기화하는 함수
+def reset_capturing():
+    global capturing
     capturing = False
 
 # LED와 부저를 깜빡이기 위한 함수
@@ -80,10 +121,44 @@ def blink_led_buzzer(led_pin, buzzer_pin=None, blink_time=1):
     if buzzer_pin:
         GPIO.output(buzzer_pin, GPIO.LOW)
 
+# Flask를 통해 MJPEG 스트림을 제공하는 함수
+def generate_frames():
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+        else:
+            # JPEG로 인코딩
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+
+            # MJPEG 스트림 형식으로 반환
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# Flask 서버를 실행하는 스레드
+def run_flask():
+    app.run(host='0.0.0.0', port=5002)
+
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.daemon = True
+flask_thread.start()
+
+# 서버와의 연결을 유지한 상태에서 웹캠 피드 처리
+client_socket = setup_connection('192.168.0.12', 5001)  # 서버에 미리 연결
+if client_socket is None:
+    print("Could not establish connection to the server. Exiting...")
+    exit(1)
+
 # 실시간 웹캠 피드에서 객체 탐지
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
+        print("Failed to grab frame")
         break
 
     frame_count += 1
@@ -136,8 +211,11 @@ while cap.isOpened():
                             cv2.imwrite(f"{save_dir}/fast_movement_{timestamp}.jpg", frame)
                             print(f"Captured fast_movement_{timestamp}.jpg")
 
-                            capture_timer = Timer(2, save_image_continuously, args=(frame, 'fast_movement'))
+                            capture_timer = Timer(2, save_image_and_send, args=(client_socket, frame, 'fast_movement'))
                             capture_timer.start()
+
+                            # 2초 후 capturing 변수를 False로 초기화
+                            Timer(2, reset_capturing).start()
 
                 prev_person_box = (xmin, ymin, xmax, ymax)
                 prev_time = current_time
@@ -158,8 +236,10 @@ while cap.isOpened():
                     cv2.imwrite(f"{save_dir}/detected_knife_{timestamp}.jpg", frame)
                     print(f"Captured detected_knife_{timestamp}.jpg")
 
-                    capture_timer = Timer(2, save_image_continuously, args=(frame, 'detected_knife'))
-                    capture_timer.start()
+                    threading.Thread(target=save_image_and_send, args=(client_socket, frame, 'detected_knife')).start()
+
+                    # 2초 후 capturing 변수를 False로 초기화
+                    Timer(2, reset_capturing).start()
 
         # 사람 탐지 시 초록색 LED 깜빡임 (스레드에서 실행)
         if person_detected and not fast_movement_detected:
@@ -169,9 +249,11 @@ while cap.isOpened():
         if fast_movement_detected or weapon_detected:
             threading.Thread(target=blink_led_buzzer, args=(red_led_pin, buzzer_pin)).start()
 
+    # 결과 프레임을 화면에 표시
     cv2.imshow('YOLO Detection - Person and Weapon', frame)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # 'q' 키가 입력되면 종료
+    if cv2.waitKey(10) & 0xFF == ord('q'):
         break
 
 cap.release()
@@ -189,3 +271,7 @@ ser.close()
 # 타이머 해제
 if capture_timer:
     capture_timer.cancel()
+
+# 서버와의 연결 해제
+if client_socket:
+    client_socket.close()
