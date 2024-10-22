@@ -9,6 +9,8 @@ import os
 import serial
 import socket
 
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
 app = Flask(__name__)
 
 # 시리얼 통신 설정
@@ -42,7 +44,7 @@ model1.names = ['Person', '-', 'thesis-gun-knife - v4 Yolov8s']
 model2.names = ['Knife', 'Pistol']
 
 # 카메라에서 입력 받기
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 # 해상도 낮추기 (처리 속도 향상을 위해)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -53,8 +55,8 @@ frame_skip = 5
 frame_count = 0
 
 # 빠른 움직임 감지에 필요한 변수들
-prev_person_box = None
-prev_time = time()
+prev_person_boxes = []  # 이전 사람의 좌표와 시간 기록을 위한 리스트
+prev_times = []
 movement_threshold = 100  # 초당 100픽셀 이상 이동 시 빠른 움직임으로 간주
 
 # 사진 저장 주기 타이머 상태
@@ -77,21 +79,19 @@ def setup_connection(server_ip, server_port=5001):
         print(f"Failed to connect to server: {e}")
         return None
 
-# 파일 전송 (이미 연결된 소켓을 사용)
 def send_file(client_socket, file_path):
     try:
-        file_name = file_path.split('/')[-1]  # 파일 이름 추출
-        client_socket.send((file_name+'\n').encode('UTF-8'))  # 파일 이름 전송
+        file_name = file_path.split('/')[-1]
+        client_socket.send((file_name + '\n').encode('utf-8'))
         print(f"Sending file: {file_name}")
 
-        # 파일 내용 전송
         with open(file_path, 'rb') as f:
             while True:
                 file_data = f.read(1024)
                 if not file_data:
                     break
                 client_socket.send(file_data)
-
+        client_socket.send(b'EOF')
         print(f"{file_name} successfully sent.")
     except Exception as e:
         print(f"Error sending file: {e}")
@@ -110,6 +110,22 @@ def save_image_and_send(client_socket, frame, label):
 def reset_capturing():
     global capturing
     capturing = False
+
+# 빠른 움직임 감지 시 2초마다 사진을 캡처하는 함수
+def capture_fast_movement(client_socket, frame):
+    global capture_timer
+    if not capturing:
+        capturing = True
+        timestamp = strftime("%Y%m%d_%H%M%S")
+        cv2.imwrite(f"{save_dir}/fast_movement_{timestamp}.jpg", frame)
+        print(f"Captured fast_movement_{timestamp}.jpg")
+
+        # 사진을 전송
+        threading.Thread(target=save_image_and_send, args=(client_socket, frame, 'fast_movement')).start()
+
+        # 2초마다 계속 캡처
+        capture_timer = Timer(2, capture_fast_movement, args=(client_socket, frame))
+        capture_timer.start()
 
 # LED와 부저를 깜빡이기 위한 함수
 def blink_led_buzzer(led_pin, buzzer_pin=None, blink_time=1):
@@ -171,62 +187,67 @@ while cap.isOpened():
         results1 = model1(img, size=320)
         detections1 = results1.pandas().xyxy[0]
 
-        # 모델 2에서 탐지 수행 (Knife, Gun)
         results2 = model2(img, size=320)
         detections2 = results2.pandas().xyxy[0]
 
         person_detected = False
-        weapon_detected = False
         fast_movement_detected = False
+        
+        current_time = time()
 
         # 사람 객체 탐지 결과를 바운딩 박스로 표시
+        current_person_boxes = []
         for _, row in detections1.iterrows():
             if row['name'] == 'Person':
                 person_detected = True
                 xmin, ymin, xmax, ymax = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
-
+                current_person_boxes.append((xmin, ymin, xmax, ymax))
+                
                 # 사람 위치를 박스로 그리기
                 cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
                 cv2.putText(frame, 'Person', (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
 
-                # 빠른 움직임 감지
-                current_time = time()
-                if prev_person_box:
-                    prev_xmin, prev_ymin, prev_xmax, prev_ymax = prev_person_box
-                    distance = ((xmin - prev_xmin) ** 2 + (ymin - prev_ymin) ** 2) ** 0.5
-                    time_diff = current_time - prev_time
-                    speed = distance / time_diff
+        # 빠른 움직임 감지
+        for i, (xmin, ymin, xmax, ymax) in enumerate(current_person_boxes):
+            if i < len(prev_person_boxes):  # 이전 좌표가 있을 경우에만 비교
+                prev_xmin, prev_ymin, prev_xmax, prev_ymax = prev_person_boxes[i]
+                distance = ((xmin - prev_xmin) ** 2 + (ymin - prev_ymin) ** 2) ** 0.5
+                time_diff = current_time - prev_times[i]
+                speed = distance / time_diff
 
-                    if speed > movement_threshold:
-                        print(f"Fast movement detected: {speed:.2f} pixels/second")
-                        fast_movement_detected = True
+                if speed > movement_threshold:
+                    print(f"Fast movement detected: {speed:.2f} pixels/second")
+                    fast_movement_detected = True
 
-                        # 빠른 움직임 시 빨간색 LED와 부저 켜기
-                        GPIO.output(red_led_pin, GPIO.HIGH)
-                        GPIO.output(buzzer_pin, GPIO.HIGH)
+                    # 빠른 움직임 시 빨간색 LED와 부저 켜기
+                    GPIO.output(red_led_pin, GPIO.HIGH)
+                    GPIO.output(buzzer_pin, GPIO.HIGH)
 
-                        if not capturing:
-                            capturing = True
-                            timestamp = strftime("%Y%m%d_%H%M%S")
-                            cv2.imwrite(f"{save_dir}/fast_movement_{timestamp}.jpg", frame)
-                            print(f"Captured fast_movement_{timestamp}.jpg")
+                    if not capturing:
+                        capturing = True
+                        timestamp = strftime("%Y%m%d_%H%M%S")
+                        cv2.imwrite(f"{save_dir}/fast_movement_{timestamp}.jpg", frame)
+                        print(f"Captured fast_movement_{timestamp}.jpg")
 
-                            capture_timer = Timer(2, save_image_and_send, args=(client_socket, frame, 'fast_movement'))
-                            capture_timer.start()
+                        capture_timer = Timer(2, save_image_and_send, args=(client_socket, frame, 'fast_movement'))
+                        capture_timer.start()
 
-                            # 2초 후 capturing 변수를 False로 초기화
-                            Timer(2, reset_capturing).start()
+                        # 2초 후 capturing 변수를 False로 초기화
+                        Timer(2, reset_capturing).start()
 
-                prev_person_box = (xmin, ymin, xmax, ymax)
-                prev_time = current_time
+        # 이전 좌표와 시간을 최신 값으로 업데이트
+        prev_person_boxes = current_person_boxes
+        prev_times = [current_time] * len(current_person_boxes)
 
-        # 무기 객체 탐지 결과를 바운딩 박스로 표시
         for _, row in detections2.iterrows():
             if row['name'] == 'Knife':
                 weapon_detected = True
                 xmin, ymin, xmax, ymax = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
                 cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 0, 255), 2)
                 cv2.putText(frame, 'Knife', (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+
+                GPIO.output(red_led_pin, GPIO.HIGH)
+                GPIO.output(buzzer_pin, GPIO.HIGH)
 
                 send_manual_mode_signal()
 
@@ -245,12 +266,9 @@ while cap.isOpened():
         if person_detected and not fast_movement_detected:
             threading.Thread(target=blink_led_buzzer, args=(green_led_pin,)).start()
 
-        # 빠른 움직임 또는 무기 탐지 시 빨간색 LED와 부저 깜빡임 (스레드에서 실행)
-        if fast_movement_detected or weapon_detected:
+        # 빠른 움직임 시 빨간색 LED와 부저 깜빡임 (스레드에서 실행)
+        if fast_movement_detected:
             threading.Thread(target=blink_led_buzzer, args=(red_led_pin, buzzer_pin)).start()
-
-    # 결과 프레임을 화면에 표시
-    cv2.imshow('YOLO Detection - Person and Weapon', frame)
 
     # 'q' 키가 입력되면 종료
     if cv2.waitKey(10) & 0xFF == ord('q'):
