@@ -1,6 +1,10 @@
 # 3조 : 자율주행 패트롤카 🚓 (Guard Rover)
   - 자율주행 로봇과 객체인식이 적용된 순찰 로봇
 
+![결과물 사진](./doc/images/RC-Car_image.jpg)
+<br><br>
+
+
 ## 📑 프로젝트 간략 소개
 - ~~자율주행을 통해~~ 구역을 순찰하며 카메라로 침입자를 감지하는 로봇
   - ~~ROS와 2D Lidar 센서를 기반으로 로봇이 이동~~
@@ -77,3 +81,10 @@ gantt
 ![동작 플로우차트](./doc/images/flowchart_diagram.jpg)
 <br><br>
 
+
+## 프리젠테이션 자료
+[발표 자료 - PPT](doc/GuardRover_presentation.pptx) <br>
+[발표 자료 - PDF](doc/GuardRover_presentation.pdf) <br>
+<br>
+
+[🔝맨 위로🔝](#top)
