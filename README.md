@@ -85,7 +85,6 @@ gantt
 ## 프리젠테이션 자료
 [발표 자료 - PPT](doc/GuardRover_presentation.pptx) <br>
 [발표 자료 - PDF](doc/GuardRover_presentation.pdf) <br>
-https://docs.google.com/presentation/d/1qRXgH1SYI_zx5CiqxUlh506z7zo80DNr/edit?usp=drive_link&ouid=106454565603355908765&rtpof=true&sd=true
 <br>
 
 [🔝맨 위로🔝](#top)
