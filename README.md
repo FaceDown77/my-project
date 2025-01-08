@@ -98,7 +98,7 @@ gantt
 
 ### 객체인식 (사람 및 무기)
 ![Detection_1](doc/images/SUS_detection_1.gif)  ![Detection_2](doc/images/SUS_detection_2.gif)
-#### 원격PC 모니터링 현황
+### 원격PC 모니터링 현황
 ![Detection_3](doc/images/Remote_PC_1.gif)  ![Detection_3](doc/images/detection_1.jpg)
 <br>
 
